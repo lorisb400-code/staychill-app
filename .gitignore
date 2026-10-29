@@ -1,0 +1,7 @@
+# Android / Gradle
+.gradle/
+build/
+local.properties
+*.keystore
+.idea/
+*.iml
