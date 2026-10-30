@@ -149,3 +149,14 @@ h2 { font-size: 20px; }
 .toast.error { background: var(--danger); color: #fff; }
 
 .leaflet-control-attribution { font-size: 10px; }
+
+/* ------------------------------------------------ versione web (iPhone): notch e barra home */
+.web .top { height: calc(var(--top-h) + env(safe-area-inset-top, 0px)); padding-top: env(safe-area-inset-top, 0px); }
+.web .tabs { height: calc(var(--tabs-h) + env(safe-area-inset-bottom, 0px)); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.web .sheet { padding-bottom: calc(26px + env(safe-area-inset-bottom, 0px)); }
+.web .auth { padding-top: calc(48px + env(safe-area-inset-top, 0px)); }
+.web .toast { bottom: calc(var(--tabs-h) + 24px + env(safe-area-inset-bottom, 0px)); }
+.web input, .web textarea { font-size: 16px; } /* evita lo zoom automatico di Safari */
+
+.install { width: 100%; max-width: 380px; background: #1b2f45; border: 1px solid #2f4e70; color: #dbeaff; border-radius: 16px; padding: 14px 16px; display: grid; gap: 4px; font-size: 14px; }
+.install .share { font-style: normal; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: #2f4e70; }

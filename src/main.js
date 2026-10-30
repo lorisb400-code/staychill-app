@@ -1,11 +1,22 @@
 import 'leaflet/dist/leaflet.css'
 import './style.css'
 import L from 'leaflet'
+import { Capacitor } from '@capacitor/core'
 import { Geolocation } from '@capacitor/geolocation'
 import { api, configured } from './api.js'
 import { EMOJI, emojiHTML } from './emoji.js'
 
 const ROME = [41.9028, 12.4964]
+const isNative = Capacitor.isNativePlatform()
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+const isStandalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
+
+// Versione web (iPhone): la pagina occupa tutto lo schermo e si scosta da notch e barra in basso
+if (!isNative) {
+  const vp = document.querySelector('meta[name=viewport]')
+  if (vp && !vp.content.includes('viewport-fit')) vp.content += ', viewport-fit=cover'
+  document.documentElement.classList.add('web')
+}
 const TABS = {
   general: { title: 'General map', icon: '🗺️' },
   mine: { title: 'My map', icon: '📍' },
@@ -55,17 +66,35 @@ function distanceM(a, b) {
 }
 
 function directionsLink(lat, lng) {
+  if (isIOS) return `https://maps.apple.com/?daddr=${lat},${lng}`
   return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`
 }
 
 // Ridimensiona e ricomprime la foto: così pesa poco e perde i metadati (GPS, data, telefono)
+async function loadImage(file) {
+  try {
+    return await createImageBitmap(file, { imageOrientation: 'from-image' })
+  } catch {
+    // Safari più vecchi: passo da un <img>, che rispetta comunque l'orientamento
+    const url = URL.createObjectURL(file)
+    try {
+      const img = new Image()
+      img.src = url
+      await img.decode()
+      return { width: img.naturalWidth, height: img.naturalHeight, img }
+    } finally { setTimeout(() => URL.revokeObjectURL(url), 1000) }
+  }
+}
+
 async function compressImage(file, max = 1600) {
-  const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' })
+  const loaded = await loadImage(file)
+  const bmp = loaded.img ? { width: loaded.width, height: loaded.height, close: null } : loaded
+  const source = loaded.img || loaded
   const scale = Math.min(1, max / Math.max(bmp.width, bmp.height))
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(bmp.width * scale)
   canvas.height = Math.round(bmp.height * scale)
-  canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height)
+  canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height)
   bmp.close?.()
   return new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error('Foto non leggibile'))), 'image/jpeg', 0.82))
 }
@@ -90,6 +119,7 @@ function renderLogin(mode = 'login') {
       <button class="btn primary" type="submit">${mode === 'signup' ? 'Crea account' : 'Entra'}</button>
       ${!configured ? '<p class="hint">Modalità demo: i dati non vengono salvati.</p>' : ''}
     </form>
+    ${installHint()}
     <div id="toast" class="toast"></div>
   </div>`
   app.querySelectorAll('[data-mode]').forEach((b) => (b.onclick = () => renderLogin(b.dataset.mode)))
@@ -110,6 +140,14 @@ function renderLogin(mode = 'login') {
       }
     })
   }
+}
+
+function installHint() {
+  if (isNative || isStandalone || !isIOS) return ''
+  return `<div class="install">
+    <b>Installala sull'iPhone</b>
+    <span>In Safari tocca <i class="share">⬆︎</i> <b>Condividi</b>, poi <b>Aggiungi alla schermata Home</b>.</span>
+  </div>`
 }
 
 // ---------------------------------------------------------------- shell
@@ -491,6 +529,7 @@ function showAccount() {
   openSheet(`
     <h2>${esc(state.username || 'Account')}</h2>
     <p class="muted">${esc(state.user.email || '')}</p>
+    ${installHint() ? `<div style="margin-top:14px">${installHint()}</div>` : ''}
     <button class="btn ghost wide" id="logout">Esci</button>`)
   $('#logout').onclick = () => { closeSheet(); api.signOut() }
 }
