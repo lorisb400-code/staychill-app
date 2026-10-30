@@ -176,3 +176,24 @@ h2 { font-size: 20px; }
 .photo-pin.is-pending img { border-radius: 11px; }
 #accountBtn { position: relative; }
 #accountBtn[data-badge]:not([data-badge=""])::after { content: attr(data-badge); position: absolute; top: -5px; right: -5px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; background: var(--danger); color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; }
+
+/* ------------------------------------------------ ricerca */
+.top .icon-btn { flex: none; }
+.search { position: absolute; inset: 0 0 auto 0; z-index: 800; padding: 10px 12px; background: linear-gradient(var(--bg) 70%, transparent); max-height: 100%; display: flex; flex-direction: column; }
+.search[hidden] { display: none; }
+.search-bar { display: flex; gap: 8px; align-items: center; }
+.search-bar input { margin: 0; flex: 1; -webkit-appearance: none; }
+.search-results { overflow: auto; margin-top: 6px; border-radius: 14px; }
+.search-results:empty { display: none; }
+.search-results { background: var(--panel); border: 1px solid var(--line); padding: 4px 6px 8px; }
+.sr-head { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; margin: 10px 6px 4px; }
+.sr-note { color: var(--muted); margin: 6px; font-size: 14px; }
+.sr { width: 100%; display: flex; gap: 10px; align-items: center; text-align: left; background: none; border: 0; border-radius: 10px; padding: 8px 6px; }
+.sr:active { background: var(--panel-2); }
+.sr-ico { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: 10px; background: var(--panel-2); }
+.sr-txt { display: grid; min-width: 0; }
+.sr-txt b, .sr-txt small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr-txt small { color: var(--muted); }
+.search-pin { width: 22px; height: 22px; border-radius: 50%; background: #ff4d8d; border: 3px solid #fff; box-shadow: 0 0 0 0 rgba(255,77,141,.6); animation: ping 1.4s ease-out infinite; }
+@keyframes ping { to { box-shadow: 0 0 0 18px rgba(255,77,141,0); } }
+.search-bar input::-webkit-search-cancel-button { display: none; }

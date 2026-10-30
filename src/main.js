@@ -158,9 +158,17 @@ function renderShell() {
   <header class="top">
     <div class="brand">${emojiHTML(4, 22)}<span>StayChill</span></div>
     <div class="tab-title" id="tabTitle"></div>
+    <button class="icon-btn" id="searchBtn" aria-label="Cerca">🔍</button>
     <button class="icon-btn" id="accountBtn" aria-label="Account">👤</button>
   </header>
   <main class="stage">
+    <div class="search" id="search" hidden>
+      <form class="search-bar" id="searchForm" autocomplete="off">
+        <input id="searchInput" type="search" enterkeyhint="search" placeholder="Cerca un luogo, una via, una città…">
+        <button type="button" class="icon-btn" id="searchClose" aria-label="Chiudi">✕</button>
+      </form>
+      <div class="search-results" id="searchResults"></div>
+    </div>
     <div id="map"></div>
     <div class="crosshair" id="crosshair" hidden><div></div></div>
     <div class="place-bar" id="placeBar" hidden>
@@ -197,11 +205,119 @@ function renderShell() {
   $('#refreshBtn').onclick = (e) => busy(e.currentTarget, () => loadTab(true))
   $('#legendBtn').onclick = showLegend
   $('#accountBtn').onclick = showAccount
+  $('#searchBtn').onclick = openSearch
+  $('#searchClose').onclick = closeSearch
+  $('#searchForm').onsubmit = (e) => { e.preventDefault(); runSearch(true) }
+  $('#searchInput').oninput = () => { clearTimeout(runSearch._t); runSearch._t = setTimeout(() => runSearch(false), 450) }
   $('#backdrop').onclick = closeSheet
   enableSheetDrag()
 
   switchTab('general')
   locate(false)
+}
+
+// ---------------------------------------------------------------- ricerca
+let searchMarker = null
+let searchSeq = 0
+
+function openSearch() {
+  closeSheet()
+  stopPlacing()
+  $('#search').hidden = false
+  const inp = $('#searchInput')
+  inp.focus()
+  // carica anche le sezioni non ancora aperte, così la ricerca trova tutto
+  Promise.all([
+    state.places.length ? null : api.listPlaces().then((r) => (state.places = r)),
+    state.spots.length ? null : api.listSpots().then((r) => (state.spots = r)),
+    state.marks.length ? null : api.listMarks().then((r) => (state.marks = r)),
+  ]).catch(() => {})
+  if (inp.value) runSearch(false)
+}
+function closeSearch() {
+  $('#search').hidden = true
+  $('#searchResults').innerHTML = ''
+  $('#searchInput').blur()
+}
+
+function norm(t) {
+  return String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
+// Cerca indirizzi e luoghi su OpenStreetMap (servizio gratuito Photon)
+async function geocode(q) {
+  const c = map.getCenter()
+  const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=8&lat=${c.lat.toFixed(4)}&lon=${c.lng.toFixed(4)}`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error('Ricerca non disponibile, riprova tra poco.')
+  const data = await res.json()
+  return (data.features || []).map((f) => {
+    const p = f.properties || {}
+    const street = [p.street, p.housenumber].filter(Boolean).join(' ')
+    const title = p.name || street || p.city || p.county || 'Luogo'
+    const sub = [p.name && street ? street : null, p.postcode, p.city || p.town || p.village, p.state, p.country !== 'Italia' && p.country !== 'Italy' ? p.country : null]
+      .filter((x) => x && x !== title).join(', ')
+    const [lng, lat] = f.geometry.coordinates
+    const big = ['city', 'town', 'state', 'county', 'country', 'region'].includes(p.type) || p.osm_value === 'city'
+    return { title, sub, lat, lng, zoom: big ? 13 : 17 }
+  })
+}
+
+async function runSearch(submitted) {
+  const q = $('#searchInput').value.trim()
+  const box = $('#searchResults')
+  if (q.length < 2) { box.innerHTML = ''; return }
+  const seq = ++searchSeq
+  const nq = norm(q)
+
+  // 1) prima i risultati di StayChill (già in memoria)
+  const local = []
+  for (const p of state.places) if (norm(p.name).includes(nq)) local.push({ kind: 'place', id: p.id, title: p.name, sub: 'General map', icon: p.winner ? emojiHTML(p.winner, 22) : '📍', lat: p.lat, lng: p.lng })
+  for (const s of state.spots) if (norm(s.title).includes(nq)) local.push({ kind: 'spot', id: s.id, title: s.title, sub: 'Spot', icon: '📸', lat: s.lat, lng: s.lng })
+  for (const m of state.marks) if (norm(m.note).includes(nq)) local.push({ kind: 'mark', id: m.id, title: m.note, sub: 'My map', icon: emojiHTML(m.emoji, 22), lat: m.lat, lng: m.lng })
+
+  const render = (geo, loading, err) => {
+    if (seq !== searchSeq) return
+    box.innerHTML = `
+      ${local.length ? `<p class="sr-head">Su StayChill</p>${local.slice(0, 6).map((r, i) => `
+        <button class="sr" data-local="${i}"><span class="sr-ico">${r.icon}</span><span class="sr-txt"><b>${esc(r.title)}</b><small>${r.sub}</small></span></button>`).join('')}` : ''}
+      <p class="sr-head">Sulla mappa</p>
+      ${loading ? '<p class="sr-note"><span class="spinner"></span></p>' : ''}
+      ${err ? `<p class="sr-note">${esc(err)}</p>` : ''}
+      ${geo && !geo.length && !loading ? '<p class="sr-note">Nessun risultato.</p>' : ''}
+      ${(geo || []).map((r, i) => `
+        <button class="sr" data-geo="${i}"><span class="sr-ico">📍</span><span class="sr-txt"><b>${esc(r.title)}</b><small>${esc(r.sub)}</small></span></button>`).join('')}`
+    box.querySelectorAll('[data-local]').forEach((b) => (b.onclick = () => pickLocal(local[+b.dataset.local])))
+    box.querySelectorAll('[data-geo]').forEach((b) => (b.onclick = () => pickGeo(geo[+b.dataset.geo])))
+  }
+
+  render(null, true)
+  try {
+    const geo = await geocode(q)
+    render(geo, false)
+    if (submitted && !local.length && geo.length === 1) pickGeo(geo[0])
+  } catch (e) {
+    render([], false, navigator.onLine === false ? 'Sei offline.' : e.message)
+  }
+}
+
+function pickGeo(r) {
+  closeSearch()
+  map.flyTo([r.lat, r.lng], r.zoom, { duration: 0.8 })
+  if (searchMarker) searchMarker.remove()
+  searchMarker = L.marker([r.lat, r.lng], {
+    icon: L.divIcon({ className: 'pin-wrap', html: '<div class="search-pin"></div>', iconSize: [22, 22], iconAnchor: [11, 11] }),
+    interactive: false,
+  }).addTo(map)
+  setTimeout(() => { searchMarker?.remove(); searchMarker = null }, 15000)
+}
+
+function pickLocal(r) {
+  closeSearch()
+  const tab = r.kind === 'place' ? 'general' : r.kind === 'spot' ? 'spot' : 'mine'
+  if (state.tab !== tab) switchTab(tab)
+  map.flyTo([r.lat, r.lng], 17, { duration: 0.6 })
+  setTimeout(() => (r.kind === 'place' ? openPlace(r.id) : r.kind === 'spot' ? openSpot(r.id) : openMark(r.id)), 650)
 }
 
 function switchTab(tab) {
