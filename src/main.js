@@ -26,6 +26,8 @@ const TABS = {
 const state = {
   user: null,
   username: '',
+  admin: false,
+  banned: false,
   tab: 'general',
   places: [],
   myVotes: {},
@@ -245,7 +247,7 @@ function drawMarkers() {
   if (state.tab === 'general') {
     for (const p of state.places) {
       const inner = p.winner ? emojiHTML(p.winner, 26) : '<span class="q">?</span>'
-      const cls = p.winner ? `w${p.winner}` : 'empty'
+      const cls = (p.winner ? `w${p.winner}` : 'empty') + (p.hidden ? ' is-hidden' : '')
       L.marker([p.lat, p.lng], { icon: pin(inner, cls, p.total > 1 ? p.total : '') })
         .on('click', () => openPlace(p.id))
         .addTo(layer)
@@ -260,7 +262,7 @@ function drawMarkers() {
     for (const s of state.spots) {
       const icon = L.divIcon({
         className: 'pin-wrap',
-        html: `<div class="photo-pin"><img src="${esc(api.photoUrl(s.photo_path))}" alt="" loading="lazy"></div>`,
+        html: `<div class="photo-pin${s.hidden ? ' is-hidden' : ''}"><img src="${esc(api.photoUrl(s.photo_path))}" alt="" loading="lazy"></div>`,
         iconSize: [52, 60],
         iconAnchor: [26, 58],
       })
@@ -400,10 +402,12 @@ function openPlace(id) {
     </div>
     <p class="label">${mine ? 'Il tuo voto (tocca di nuovo per toglierlo)' : 'Vota questo luogo'}</p>
     ${emojiPicker(mine)}
+    ${p.hidden ? '<div class="notice">Nascosto agli altri per segnalazioni.</div>' : ''}
     <div class="row">
       <a class="btn ghost" href="${directionsLink(p.lat, p.lng)}">Portami qui</a>
-      ${p.created_by === state.user.id ? '<button class="btn danger" id="pDel">Elimina luogo</button>' : ''}
-    </div>`)
+      ${p.created_by !== state.user.id ? '<button class="btn ghost" id="pRep">Segnala</button>' : ''}
+    </div>
+    ${modRow(p.created_by === state.user.id, p.created_by, p.hidden, p.reports)}`)
   body.querySelectorAll('.pick').forEach((b) => (b.onclick = () => busy(null, async () => {
     const n = +b.dataset.emoji
     const next = mine === n ? null : n
@@ -412,10 +416,47 @@ function openPlace(id) {
     await loadTab()
     openPlace(id)
   })))
-  const del = $('#pDel')
+  const rep = $('#pRep')
+  if (rep) rep.onclick = (e) => {
+    if (!confirm(`Segnalare "${p.name}" come inappropriato?`)) return
+    busy(e.currentTarget, async () => { await api.reportPlace(id); toast('Grazie, segnalazione inviata') })
+  }
+  bindMod({
+    kind: 'place', id, authorId: p.created_by,
+    remove: async () => {
+      if (p.total > 1 && !confirm(`Eliminare "${p.name}"? Si perderanno anche i ${p.total} voti.`)) return false
+      await api.deletePlace(id)
+    },
+  })
+}
+
+// Riga di moderazione: Elimina (autore o admin), Ripristina e Blocca autore (solo admin)
+function modRow(own, authorId, hidden, reports) {
+  const btns = []
+  if (own || state.admin) btns.push('<button class="btn danger" id="modDel">Elimina</button>')
+  if (state.admin && (hidden || reports > 0)) btns.push(`<button class="btn ghost" id="modRestore">${hidden ? 'Ripristina' : 'Ignora segnalazioni'}</button>`)
+  if (state.admin && !own && authorId) btns.push('<button class="btn danger" id="modBan">Blocca autore</button>')
+  if (!btns.length) return ''
+  return `${state.admin && reports > 0 ? `<p class="label">Segnalazioni ricevute: <b>${reports}</b></p>` : ''}<div class="row mod">${btns.join('')}</div>`
+}
+
+function bindMod({ kind, id, authorId, remove }) {
+  const del = $('#modDel')
   if (del) del.onclick = (e) => {
-    if (p.total > 1 && !confirm(`Eliminare "${p.name}"? Si perderanno anche i ${p.total} voti degli altri.`)) return
-    busy(e.currentTarget, async () => { await api.deletePlace(id); closeSheet(); await loadTab(); toast('Luogo eliminato') })
+    if (!confirm('Eliminare definitivamente?')) return
+    busy(e.currentTarget, async () => {
+      if ((await remove()) === false) return
+      closeSheet(); await loadTab(); toast('Eliminato')
+    })
+  }
+  const restore = $('#modRestore')
+  if (restore) restore.onclick = (e) => busy(e.currentTarget, async () => {
+    await api.setHidden(kind, id, false); closeSheet(); await loadTab(); toast('Ripristinato')
+  })
+  const ban = $('#modBan')
+  if (ban) ban.onclick = (e) => {
+    if (!confirm('Bloccare questo utente? Non potrà più pubblicare, votare né segnalare.')) return
+    busy(e.currentTarget, async () => { await api.banUser(authorId, true); toast('Utente bloccato') })
   }
 }
 
@@ -503,10 +544,10 @@ function openSpot(id) {
     <p class="muted">di <b>${esc(s.username || 'utente')}</b> · ${fmtDate(s.created_at)}${s.hidden ? ' · <b>nascosto per segnalazioni</b>' : ''}</p>
     <div class="row">
       <a class="btn ghost" href="${directionsLink(s.lat, s.lng)}">Portami qui</a>
-      ${own ? '<button class="btn danger" id="sDel">Elimina</button>' : '<button class="btn ghost" id="sRep">Segnala</button>'}
-    </div>`)
-  const del = $('#sDel')
-  if (del) del.onclick = (e) => busy(e.currentTarget, async () => { await api.deleteSpot(s); closeSheet(); await loadTab(); toast('Spot eliminato') })
+      ${!own ? '<button class="btn ghost" id="sRep">Segnala</button>' : ''}
+    </div>
+    ${modRow(own, s.user_id, s.hidden, s.reports)}`)
+  bindMod({ kind: 'spot', id, authorId: s.user_id, remove: () => api.deleteSpot(s) })
   const rep = $('#sRep')
   if (rep) rep.onclick = (e) => {
     if (!confirm('Segnalare questa foto come inappropriata?')) return
@@ -528,10 +569,42 @@ function showLegend() {
 function showAccount() {
   openSheet(`
     <h2>${esc(state.username || 'Account')}</h2>
-    <p class="muted">${esc(state.user.email || '')}</p>
+    <p class="muted">${esc(state.user.email || '')}${state.admin ? ' · <b>amministratore</b>' : ''}</p>
+    ${state.banned ? '<div class="notice">Il tuo account è stato bloccato: puoi guardare la mappa ma non pubblicare, votare o segnalare.</div>' : ''}
+    ${state.admin ? '<button class="btn primary wide" id="queueBtn">Segnalazioni e contenuti nascosti</button>' : ''}
     ${installHint() ? `<div style="margin-top:14px">${installHint()}</div>` : ''}
     <button class="btn ghost wide" id="logout">Esci</button>`)
   $('#logout').onclick = () => { closeSheet(); api.signOut() }
+  const q = $('#queueBtn')
+  if (q) q.onclick = (e) => busy(e.currentTarget, showQueue)
+}
+
+async function showQueue() {
+  const { places, spots } = await api.adminQueue()
+  const item = (kind, o, title, img) => `
+    <button class="q-item" data-kind="${kind}" data-id="${o.id}">
+      ${img ? `<img src="${esc(img)}" alt="">` : `<span class="q-ico">${o.winner ? emojiHTML(o.winner, 26) : '?'}</span>`}
+      <span class="q-txt"><b>${esc(title)}</b><small>${o.reports} segnalazion${o.reports === 1 ? 'e' : 'i'}${o.hidden ? ' · nascosto' : ''}</small></span>
+    </button>`
+  openSheet(`
+    <h2>Da controllare</h2>
+    <p class="muted">Tocca un elemento per aprirlo ed eliminarlo, ripristinarlo o bloccarne l'autore.</p>
+    <p class="label">Spot</p>
+    ${spots.length ? spots.map((s) => item('spot', s, s.title, api.photoUrl(s.photo_path))).join('') : '<p class="muted">Nessuno spot segnalato.</p>'}
+    <p class="label">Luoghi</p>
+    ${places.length ? places.map((p) => item('place', p, p.name)).join('') : '<p class="muted">Nessun luogo segnalato.</p>'}`)
+  document.querySelectorAll('.q-item').forEach((b) => (b.onclick = async () => {
+    const id = +b.dataset.id
+    if (b.dataset.kind === 'spot') {
+      if (state.tab !== 'spot') { switchTab('spot'); await loadTab() }
+      if (!state.spots.find((x) => x.id === id)) state.spots.push(spots.find((x) => x.id === id))
+      openSpot(id)
+    } else {
+      if (state.tab !== 'general') { switchTab('general'); await loadTab() }
+      if (!state.places.find((x) => x.id === id)) state.places.push(places.find((x) => x.id === id))
+      openPlace(id)
+    }
+  }))
 }
 
 // ---------------------------------------------------------------- avvio
@@ -542,6 +615,8 @@ async function onUser(user) {
   if (!user) { map?.remove(); map = null; meMarker = null; renderLogin(); return }
   const prof = await api.getProfile(user.id).catch(() => null)
   state.username = prof?.username || ''
+  state.admin = !!prof?.admin
+  state.banned = !!prof?.banned
   map?.remove(); meMarker = null
   renderShell()
 }

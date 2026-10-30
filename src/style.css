@@ -160,3 +160,12 @@ h2 { font-size: 20px; }
 
 .install { width: 100%; max-width: 380px; background: #1b2f45; border: 1px solid #2f4e70; color: #dbeaff; border-radius: 16px; padding: 14px 16px; display: grid; gap: 4px; font-size: 14px; }
 .install .share { font-style: normal; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: #2f4e70; }
+
+/* ------------------------------------------------ moderazione */
+.row.mod { margin-top: 10px; }
+.is-hidden { opacity: .45; filter: grayscale(.6); }
+.q-item { width: 100%; display: flex; align-items: center; gap: 12px; text-align: left; background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 8px; margin-top: 8px; }
+.q-item img, .q-ico { width: 52px; height: 52px; border-radius: 10px; object-fit: cover; flex: none; display: grid; place-items: center; background: #fff; }
+.q-txt { display: grid; gap: 2px; min-width: 0; }
+.q-txt b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.q-txt small { color: var(--muted); }

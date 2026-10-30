@@ -12,6 +12,8 @@ function check({ data, error }) {
 
 function translateError(msg = '') {
   const m = msg.toLowerCase()
+  if (m.includes('contenuto_vietato')) return 'Il testo contiene parole non consentite. Riformulalo.'
+  if (m.includes('row-level security')) return 'Operazione non consentita (il tuo account potrebbe essere bloccato).'
   if (m.includes('invalid login credentials')) return 'Email o password sbagliate.'
   if (m.includes('already registered') || m.includes('already been registered')) return 'Questa email è già registrata. Prova ad accedere.'
   if (m.includes('password should be at least')) return 'La password deve avere almeno 6 caratteri.'
@@ -45,8 +47,11 @@ function supabaseApi() {
       await sb.auth.signOut()
     },
     async getProfile(userId) {
-      const { data } = await sb.from('profiles').select('username').eq('id', userId).maybeSingle()
-      return data
+      const [{ data: prof }, { data: adm }] = await Promise.all([
+        sb.from('profiles').select('username, banned').eq('id', userId).maybeSingle(),
+        sb.from('admins').select('user_id').eq('user_id', userId).maybeSingle(),
+      ])
+      return { username: prof?.username, banned: !!prof?.banned, admin: !!adm }
     },
 
     // ---- General map
@@ -107,6 +112,30 @@ function supabaseApi() {
       const { error } = await sb.from('reports').insert({ spot_id: id })
       if (error && !String(error.code).startsWith('23505')) throw new Error(translateError(error.message))
     },
+    async reportPlace(id) {
+      const { error } = await sb.from('place_reports').insert({ place_id: id })
+      if (error && !String(error.code).startsWith('23505')) throw new Error(translateError(error.message))
+    },
+
+    // ---- Solo amministratori
+    async setHidden(kind, id, hidden) {
+      check(await sb.from(kind === 'place' ? 'places' : 'spots').update({ hidden }).eq('id', id))
+      if (!hidden) {
+        // ripristinare = ignorare le segnalazioni ricevute finora
+        if (kind === 'place') check(await sb.from('place_reports').delete().eq('place_id', id))
+        else check(await sb.from('reports').delete().eq('spot_id', id))
+      }
+    },
+    async banUser(userId, banned = true) {
+      check(await sb.rpc('set_banned', { target: userId, value: banned }))
+    },
+    async adminQueue() {
+      const [places, spots] = await Promise.all([
+        sb.from('place_summary').select('*').or('hidden.eq.true,reports.gt.0').order('reports', { ascending: false }),
+        sb.from('spot_feed').select('*').or('hidden.eq.true,reports.gt.0').order('reports', { ascending: false }),
+      ])
+      return { places: check(places), spots: check(spots) }
+    },
   }
 }
 
@@ -147,7 +176,7 @@ function mockApi() {
     async signUp() { user = me; authCb(user); return { needsConfirm: false } },
     async signIn() { user = me; authCb(user) },
     async signOut() { user = null; authCb(null) },
-    async getProfile() { return { username: 'demo' } },
+    async getProfile() { return { username: 'demo', admin: true, banned: false } },
     async listPlaces() { return wait(places.map(summary)) },
     async myVotes() { return wait(Object.fromEntries(votes.filter((v) => v.user_id === 'me').map((v) => [v.place_id, v.emoji]))) },
     async addPlace(name, lat, lng) { const id = ++seq; places.push({ id, name, lat, lng, created_by: 'me' }); return wait(id) },
@@ -168,7 +197,11 @@ function mockApi() {
       return wait()
     },
     async deleteSpot(spot) { spots.splice(spots.findIndex((s) => s.id === spot.id), 1) },
-    async reportSpot() { return wait() },
+    async reportSpot(id) { const s = spots.find((x) => x.id === id); if (s) s.reports = (s.reports || 0) + 1; return wait() },
+    async reportPlace(id) { const p = places.find((x) => x.id === id); if (p) p.reports = (p.reports || 0) + 1; return wait() },
+    async setHidden(kind, id, hidden) { const o = (kind === 'place' ? places : spots).find((x) => x.id === id); if (o) { o.hidden = hidden; if (!hidden) o.reports = 0 } return wait() },
+    async banUser() { return wait() },
+    async adminQueue() { return wait({ places: places.map(summary).filter((p) => p.hidden || p.reports), spots: spots.filter((s) => s.hidden || s.reports) }) },
   }
 }
 
