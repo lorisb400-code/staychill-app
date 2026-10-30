@@ -227,9 +227,21 @@ async function loadTab(force = false) {
     }
     if (state.tab === tab) drawMarkers()
     if (force) toast('Aggiornato')
+    refreshAdminBadge()
   } catch (e) {
     toast(e.message, true)
   }
+}
+
+// Pallino sul tasto 👤 con il numero di cose da controllare (solo admin)
+async function refreshAdminBadge() {
+  if (!state.admin) return
+  try {
+    const { places, spots } = await api.adminQueue()
+    const n = places.length + spots.length
+    const btn = $('#accountBtn')
+    if (btn) btn.dataset.badge = n > 0 ? String(n) : ''
+  } catch { /* ignora: la tabella potrebbe non esistere ancora */ }
 }
 
 // ---------------------------------------------------------------- marker
@@ -262,7 +274,7 @@ function drawMarkers() {
     for (const s of state.spots) {
       const icon = L.divIcon({
         className: 'pin-wrap',
-        html: `<div class="photo-pin${s.hidden ? ' is-hidden' : ''}"><img src="${esc(api.photoUrl(s.photo_path))}" alt="" loading="lazy"></div>`,
+        html: `<div class="photo-pin${s.hidden ? ' is-hidden' : ''}${s.approved === false ? ' is-pending' : ''}"><img src="${esc(api.photoUrl(s.photo_path))}" alt="" loading="lazy"></div>`,
         iconSize: [52, 60],
         iconAnchor: [26, 58],
       })
@@ -431,8 +443,9 @@ function openPlace(id) {
 }
 
 // Riga di moderazione: Elimina (autore o admin), Ripristina e Blocca autore (solo admin)
-function modRow(own, authorId, hidden, reports) {
+function modRow(own, authorId, hidden, reports, pending = false) {
   const btns = []
+  if (state.admin && pending) btns.push('<button class="btn primary" id="modApprove">Approva</button>')
   if (own || state.admin) btns.push('<button class="btn danger" id="modDel">Elimina</button>')
   if (state.admin && (hidden || reports > 0)) btns.push(`<button class="btn ghost" id="modRestore">${hidden ? 'Ripristina' : 'Ignora segnalazioni'}</button>`)
   if (state.admin && !own && authorId) btns.push('<button class="btn danger" id="modBan">Blocca autore</button>')
@@ -449,6 +462,10 @@ function bindMod({ kind, id, authorId, remove }) {
       closeSheet(); await loadTab(); toast('Eliminato')
     })
   }
+  const approve = $('#modApprove')
+  if (approve) approve.onclick = (e) => busy(e.currentTarget, async () => {
+    await api.approveSpot(id); closeSheet(); await loadTab(); toast('Spot approvato: ora lo vedono tutti')
+  })
   const restore = $('#modRestore')
   if (restore) restore.onclick = (e) => busy(e.currentTarget, async () => {
     await api.setHidden(kind, id, false); closeSheet(); await loadTab(); toast('Ripristinato')
@@ -528,7 +545,7 @@ function newSpotForm(at) {
     await api.addSpot({ userId: state.user.id, lat: at.lat, lng: at.lng, title, description: $('#sDesc').value.trim(), blob })
     closeSheet()
     await loadTab()
-    toast('Spot pubblicato')
+    toast(state.admin ? 'Spot pubblicato' : 'Spot inviato: sarà visibile a tutti dopo l\'approvazione')
   })
 }
 
@@ -542,11 +559,12 @@ function openSpot(id) {
     <h2>${esc(s.title)}</h2>
     ${s.description ? `<p class="note">${esc(s.description)}</p>` : ''}
     <p class="muted">di <b>${esc(s.username || 'utente')}</b> · ${fmtDate(s.created_at)}${s.hidden ? ' · <b>nascosto per segnalazioni</b>' : ''}</p>
+    ${s.approved === false ? `<div class="notice">${own && !state.admin ? 'In attesa di approvazione: per ora lo vedi solo tu.' : 'In attesa di approvazione: gli altri utenti non lo vedono ancora.'}</div>` : ''}
     <div class="row">
       <a class="btn ghost" href="${directionsLink(s.lat, s.lng)}">Portami qui</a>
       ${!own ? '<button class="btn ghost" id="sRep">Segnala</button>' : ''}
     </div>
-    ${modRow(own, s.user_id, s.hidden, s.reports)}`)
+    ${modRow(own, s.user_id, s.hidden, s.reports, s.approved === false)}`)
   bindMod({ kind: 'spot', id, authorId: s.user_id, remove: () => api.deleteSpot(s) })
   const rep = $('#sRep')
   if (rep) rep.onclick = (e) => {
@@ -584,12 +602,12 @@ async function showQueue() {
   const item = (kind, o, title, img) => `
     <button class="q-item" data-kind="${kind}" data-id="${o.id}">
       ${img ? `<img src="${esc(img)}" alt="">` : `<span class="q-ico">${o.winner ? emojiHTML(o.winner, 26) : '?'}</span>`}
-      <span class="q-txt"><b>${esc(title)}</b><small>${o.reports} segnalazion${o.reports === 1 ? 'e' : 'i'}${o.hidden ? ' · nascosto' : ''}</small></span>
+      <span class="q-txt"><b>${esc(title)}</b><small>${o.approved === false ? '<span class="pending-tag">Da approvare</span> ' : ''}${o.reports ? `${o.reports} segnalazion${o.reports === 1 ? 'e' : 'i'}` : ''}${o.hidden ? ' · nascosto' : ''}</small></span>
     </button>`
   openSheet(`
     <h2>Da controllare</h2>
     <p class="muted">Tocca un elemento per aprirlo ed eliminarlo, ripristinarlo o bloccarne l'autore.</p>
-    <p class="label">Spot</p>
+    <p class="label">Spot da approvare o segnalati</p>
     ${spots.length ? spots.map((s) => item('spot', s, s.title, api.photoUrl(s.photo_path))).join('') : '<p class="muted">Nessuno spot segnalato.</p>'}
     <p class="label">Luoghi</p>
     ${places.length ? places.map((p) => item('place', p, p.name)).join('') : '<p class="muted">Nessun luogo segnalato.</p>'}`)

@@ -169,3 +169,10 @@ h2 { font-size: 20px; }
 .q-txt { display: grid; gap: 2px; min-width: 0; }
 .q-txt b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .q-txt small { color: var(--muted); }
+.photo-pin.is-pending { border-style: dashed; border-color: #c9a7ff; }
+.photo-pin.is-pending::after { content: '⏳'; position: absolute; right: -2px; bottom: -2px; font-size: 14px; background: var(--bg); border-radius: 8px; padding: 1px 2px; }
+.pending-tag { color: #c9a7ff; font-weight: 700; }
+.photo-pin.is-pending { overflow: visible; }
+.photo-pin.is-pending img { border-radius: 11px; }
+#accountBtn { position: relative; }
+#accountBtn[data-badge]:not([data-badge=""])::after { content: attr(data-badge); position: absolute; top: -5px; right: -5px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; background: var(--danger); color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; }

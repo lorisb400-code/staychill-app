@@ -126,13 +126,16 @@ function supabaseApi() {
         else check(await sb.from('reports').delete().eq('spot_id', id))
       }
     },
+    async approveSpot(id) {
+      check(await sb.from('spots').update({ approved: true }).eq('id', id))
+    },
     async banUser(userId, banned = true) {
       check(await sb.rpc('set_banned', { target: userId, value: banned }))
     },
     async adminQueue() {
       const [places, spots] = await Promise.all([
         sb.from('place_summary').select('*').or('hidden.eq.true,reports.gt.0').order('reports', { ascending: false }),
-        sb.from('spot_feed').select('*').or('hidden.eq.true,reports.gt.0').order('reports', { ascending: false }),
+        sb.from('spot_feed').select('*').or('hidden.eq.true,reports.gt.0,approved.eq.false').order('created_at', { ascending: true }),
       ])
       return { places: check(places), spots: check(spots) }
     },
@@ -159,6 +162,7 @@ function mockApi() {
   ]
   const marks = [{ id: 1, user_id: 'me', lat: 41.9009, lng: 12.4833, emoji: 3, note: 'Prova', created_at: new Date().toISOString() }]
   const spots = [
+    { id: 2, user_id: 'b', username: 'giulia', lat: 41.8986, lng: 12.4769, title: 'Scalinata tranquilla', description: '', photo_path: 'demo', approved: false, created_at: new Date().toISOString() },
     { id: 1, user_id: 'a', username: 'marco', lat: 41.8892, lng: 12.4707, title: 'Tramonto sul Tevere', description: 'Panchina tranquilla con vista.', photo_path: 'demo', created_at: new Date().toISOString() },
   ]
   const demoPhoto = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f59e5b"/><stop offset="1" stop-color="#5b3a8a"/></linearGradient></defs><rect width="400" height="300" fill="url(#g)"/><circle cx="200" cy="190" r="50" fill="#ffd27a"/><rect y="210" width="400" height="90" fill="#2a3f5a"/></svg>')
@@ -201,7 +205,8 @@ function mockApi() {
     async reportPlace(id) { const p = places.find((x) => x.id === id); if (p) p.reports = (p.reports || 0) + 1; return wait() },
     async setHidden(kind, id, hidden) { const o = (kind === 'place' ? places : spots).find((x) => x.id === id); if (o) { o.hidden = hidden; if (!hidden) o.reports = 0 } return wait() },
     async banUser() { return wait() },
-    async adminQueue() { return wait({ places: places.map(summary).filter((p) => p.hidden || p.reports), spots: spots.filter((s) => s.hidden || s.reports) }) },
+    async approveSpot(id) { const s = spots.find((x) => x.id === id); if (s) s.approved = true; return wait() },
+    async adminQueue() { return wait({ places: places.map(summary).filter((p) => p.hidden || p.reports), spots: spots.filter((s) => s.hidden || s.reports || s.approved === false) }) },
   }
 }
 
