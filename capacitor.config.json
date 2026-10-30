@@ -1,0 +1,9 @@
+{
+  "appId": "com.staychill.app",
+  "appName": "StayChill",
+  "webDir": "dist",
+  "android": { "allowMixedContent": false },
+  "plugins": {
+    "SystemBars": { "insetsHandling": "css", "style": "DARK" }
+  }
+}

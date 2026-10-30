@@ -1,0 +1,64 @@
+name: Compila APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Installa dipendenze e costruisci l'interfaccia
+        run: |
+          npm ci
+          npm run build
+          npx cap sync android
+
+      - name: Prepara la chiave di firma
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Manca il segreto KEYSTORE_BASE64 (Settings > Secrets and variables > Actions)"
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/staychill-release.jks
+
+      - name: Compila l'APK
+        working-directory: android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+          cp app/build/outputs/apk/release/app-release.apk ../StayChill.apk
+
+      - name: Pubblica il download
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --cleanup-tag --yes || true
+          gh release create latest StayChill.apk \
+            --title "StayChill (build ${{ github.run_number }})" \
+            --notes "Scarica **StayChill.apk** qui sotto e aprilo sul telefono Android. Versione 1.0.${{ github.run_number }}." \
+            --latest
